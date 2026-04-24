@@ -49,7 +49,7 @@
 
 ## 使用方法
 
-1. **启动程序** - 运行 `VibeSentinel.exe`、`python vibe_sentinel_gui.py` 或 `启动监控.bat`
+1. **启动程序** - 运行 `python vibe_sentinel_gui.py` 或 `启动监控.bat`
 
 2. **选择监控区域**
    - 点击界面上的"选择区域"按钮

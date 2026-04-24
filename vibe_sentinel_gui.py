@@ -212,7 +212,7 @@ class SentinelApp:
             log_error(f"_show_monitor_info error: {e}")
 
     def _setup_ui(self):
-        self.root.geometry("500x500")
+        self.root.geometry("600x700")
         self.root.resizable(False, False)
 
         container = ttk.Frame(self.root)
@@ -427,24 +427,18 @@ class SentinelApp:
             if not self.region:
                 continue
             try:
+                # 再次检查 is_running，因为可能在 sleep 期间被设置为 False
+                if not self.is_running:
+                    break
+                
                 has_activity, _ = self.monitor.capture_and_compare()
                 if has_activity:
                     self.idle_start_time = None
                     self.alarm_triggered = False
-                    # 避免在非主线程中直接更新 UI
-                    try:
-                        self.root.after(0, lambda: self.status_label.config(text="状态: 监控中 (有活动)", foreground='green'))
-                    except Exception as e:
-                        log_error(f"UI update error: {e}")
                 else:
-                    idle_time = time.time() - self.idle_start_time if self.idle_start_time else 0
-                    # 避免在非主线程中直接更新 UI
-                    try:
-                        self.root.after(0, lambda t=idle_time: self.status_label.config(text=f"状态: 画面静止 {int(t)} 秒", foreground='orange'))
-                    except Exception as e:
-                        log_error(f"UI update error: {e}")
                     if self.idle_start_time is None:
                         self.idle_start_time = time.time()
+                    idle_time = time.time() - self.idle_start_time
                     if idle_time >= self.threshold and not self.alarm_triggered:
                         self.alarm_triggered = True
                         # 优先使用MP3
@@ -454,6 +448,9 @@ class SentinelApp:
                                 def play_mp3():
                                     try:
                                         for i in range(self.mp3_count):
+                                            # 检查是否仍然需要播放
+                                            if not self.is_running:
+                                                break
                                             log_error(f"播放MP3 {i+1}/{self.mp3_count}")
                                             playsound(self.mp3_path)
                                             if i < self.mp3_count - 1:
@@ -469,14 +466,10 @@ class SentinelApp:
                         else:
                             # 隐藏蜂鸣功能
                             log_error("未设置MP3文件")
-                        # 避免在非主线程中直接更新 UI
-                        try:
-                            current_idle = idle_time
-                            self.root.after(0, lambda t=current_idle: self.status_label.config(text=f"警报: 画面静止 {int(t)} 秒!", foreground='red'))
-                        except Exception as e:
-                            log_error(f"UI update error: {e}")
             except Exception as e:
                 log_error(f"_monitor_loop error: {e}")
+                # 如果发生错误，短暂休眠后继续
+                time.sleep(1)
         if self.monitor:
             self.monitor.close()
 
@@ -501,9 +494,38 @@ class SentinelApp:
             self.stop_btn.config(state='normal')
             self.select_region_btn.config(state='disabled')  # 禁止重新框选
             self.status_label.config(text="状态: 监控中", foreground='green')
+            # 启动状态更新循环
+            self._update_status()
         except Exception as e:
             log_error(f"_start error: {e}")
             messagebox.showerror("错误", f"启动监控失败: {e}")
+    
+    def _update_status(self):
+        """定期更新监控状态"""
+        if not self.is_running:
+            return
+        
+        try:
+            # 计算当前空闲时间
+            idle_time = time.time() - self.idle_start_time if self.idle_start_time else 0
+            
+            # 根据状态更新UI
+            if not self.alarm_triggered:
+                if idle_time > 0:
+                    self.status_label.config(text=f"状态: 画面静止 {int(idle_time)} 秒", foreground='orange')
+                else:
+                    self.status_label.config(text="状态: 监控中 (有活动)", foreground='green')
+            else:
+                self.status_label.config(text=f"警报: 画面静止 {int(idle_time)} 秒!", foreground='red')
+                
+            # 继续定时更新
+            if self.is_running:
+                self.root.after(1000, self._update_status)  # 每秒更新一次
+        except Exception as e:
+            log_error(f"_update_status error: {e}")
+            # 即使出错也继续尝试更新
+            if self.is_running:
+                self.root.after(1000, self._update_status)
 
     def _stop(self):
         self.is_running = False
