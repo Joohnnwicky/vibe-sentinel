@@ -37,7 +37,7 @@ PIXEL_CHANGE_THRESHOLD = 0.05
 class RegionSelector:
     def __init__(self, monitor_num=1):
         self.monitor_num = monitor_num
-        self.region = None
+        self._region = None
         self.sct = mss.mss()
         self.monitor_info = self.sct.monitors[monitor_num]
         log_error(f"Monitor {monitor_num} info: {self.monitor_info}")
@@ -51,6 +51,8 @@ class RegionSelector:
 
         log_error(f"Creating selection window: {screen_width}x{screen_height}+{screen_left}+{screen_top}")
 
+        self._region = None
+        
         root = tk.Toplevel()
         root.geometry(f"{screen_width}x{screen_height}+{screen_left}+{screen_top}")
         root.attributes('-alpha', 0.3)
@@ -61,40 +63,50 @@ class RegionSelector:
         canvas.pack()
         canvas.create_rectangle(0, 0, screen_width, screen_height, outline='', fill='gray40')
 
-        rect_id = [None]
-        instruction_text_id = [None]
-        selection_data = {'start_x': 0, 'start_y': 0, 'is_selecting': False}
+        rect_id = None
+        instruction_text_id = None
+        start_x = 0
+        start_y = 0
+        is_selecting = False
 
         def update_instruction():
+            nonlocal instruction_text_id
             text = f"拖动选择区域 | {screen_width}x{screen_height} | ESC取消"
-            if instruction_text_id[0]:
-                canvas.itemconfig(instruction_text_id[0], text=text)
+            if instruction_text_id:
+                canvas.itemconfig(instruction_text_id, text=text)
             else:
-                instruction_text_id[0] = canvas.create_text(
+                instruction_text_id = canvas.create_text(
                     screen_width // 2, 20, text=text, fill='white', font=('Arial', 14, 'bold'))
 
         def on_mouse_down(event):
-            selection_data['start_x'] = event.x
-            selection_data['start_y'] = event.y
-            selection_data['is_selecting'] = True
-            if rect_id[0]:
-                canvas.delete(rect_id[0])
-            rect_id[0] = canvas.create_rectangle(event.x, event.y, event.x, event.y, outline='red', width=3)
+            nonlocal start_x, start_y, is_selecting, rect_id
+            start_x = event.x
+            start_y = event.y
+            is_selecting = True
+            if rect_id:
+                canvas.delete(rect_id)
+            rect_id = canvas.create_rectangle(event.x, event.y, event.x, event.y, outline='red', width=3)
             update_instruction()
+            log_error(f"Mouse down at ({event.x}, {event.y})")
 
         def on_mouse_move(event):
-            if selection_data['is_selecting'] and rect_id[0]:
-                canvas.coords(rect_id[0], selection_data['start_x'], selection_data['start_y'], event.x, event.y)
+            nonlocal rect_id
+            if is_selecting and rect_id:
+                canvas.coords(rect_id, start_x, start_y, event.x, event.y)
 
         def on_mouse_up(event):
-            selection_data['is_selecting'] = False
-            x1 = min(selection_data['start_x'], event.x)
-            y1 = min(selection_data['start_y'], event.y)
-            x2 = max(selection_data['start_x'], event.x)
-            y2 = max(selection_data['start_y'], event.y)
+            nonlocal is_selecting
+            is_selecting = False
+            x1 = min(start_x, event.x)
+            y1 = min(start_y, event.y)
+            x2 = max(start_x, event.x)
+            y2 = max(start_y, event.y)
+            log_error(f"Mouse up at ({event.x}, {event.y}), region size: {x2-x1}x{y2-y1}")
             if x2 - x1 > 10 and y2 - y1 > 10:
-                self.region = (x1 + screen_left, y1 + screen_top, x2 + screen_left, y2 + screen_top)
-                log_error(f"Region selected: {self.region}")
+                self._region = (x1 + screen_left, y1 + screen_top, x2 + screen_left, y2 + screen_top)
+                log_error(f"Region set: {self._region}")
+            else:
+                log_error("Region too small, not set")
             root.destroy()
 
         canvas.bind('<Button-1>', on_mouse_down)
@@ -104,8 +116,10 @@ class RegionSelector:
         root.grab_set()
         update_instruction()
         root.mainloop()
+        
+        log_error(f"After mainloop, region: {self._region}")
         self.sct.close()
-        return self.region
+        return self._region
 
 
 class ScreenMonitor:
@@ -254,10 +268,13 @@ class SentinelApp:
         try:
             selector = RegionSelector(self.monitor_num)
             region = selector.select()
+            log_error(f"_select_region got: {region}")
             if region:
                 self.region = region
                 self.region_label.config(text=f"({region[0]}, {region[1]}) → ({region[2]}, {region[3]})")
                 self._update_preview()
+            else:
+                log_error("Region is None after selection")
         except Exception as e:
             log_error(f"_select_region error: {e}")
             messagebox.showerror("错误", f"选择区域失败: {e}")
