@@ -220,7 +220,7 @@ class SentinelApp:
 
         self.region_label = ttk.Label(region_frame, text="未选择区域", foreground='gray')
         self.region_label.pack(side='left', padx=(0, 10))
-        ttk.Button(region_frame, text="📐 选择区域", command=self._select_region).pack(side='right')
+        ttk.Button(region_frame, text="选择区域", command=self._select_region).pack(side='right')
 
         preview_frame = ttk.LabelFrame(main_frame, text="区域预览", padding="5")
         preview_frame.pack(fill='both', expand=True, pady=(0, 10))
@@ -258,9 +258,9 @@ class SentinelApp:
         control_frame.pack(fill='x')
         self.status_label = ttk.Label(control_frame, text="状态: 待机", foreground='gray')
         self.status_label.pack(side='left', pady=(0, 10))
-        self.start_btn = ttk.Button(control_frame, text="▶ 开始监控", command=self._start)
+        self.start_btn = ttk.Button(control_frame, text="开始监控", command=self._start)
         self.start_btn.pack(side='right')
-        self.stop_btn = ttk.Button(control_frame, text="⏹ 停止监控", command=self._stop, state='disabled')
+        self.stop_btn = ttk.Button(control_frame, text="停止监控", command=self._stop, state='disabled')
         self.stop_btn.pack(side='right', padx=(0, 5))
 
     def _select_region(self):
@@ -271,7 +271,7 @@ class SentinelApp:
             log_error(f"_select_region got: {region}")
             if region:
                 self.region = region
-                self.region_label.config(text=f"({region[0]}, {region[1]}) → ({region[2]}, {region[3]})")
+                self.region_label.config(text=f"({region[0]}, {region[1]}) -> ({region[2]}, {region[3]})")
                 self._update_preview()
             else:
                 log_error("Region is None after selection")
@@ -338,7 +338,7 @@ class SentinelApp:
                     if idle_time >= self.threshold and not self.alarm_triggered:
                         self.alarm_triggered = True
                         self._beep_alarm()
-                        self.root.after(0, lambda: self.status_label.config(text=f"⚠️ 警报: 画面静止 {int(idle_time)} 秒!", foreground='red'))
+                        self.root.after(0, lambda: self.status_label.config(text=f"警报: 画面静止 {int(idle_time)} 秒!", foreground='red'))
             except Exception as e:
                 log_error(f"_monitor_loop error: {e}")
         if self.monitor:
@@ -346,7 +346,7 @@ class SentinelApp:
 
     def _start(self):
         if not self.region:
-            messagebox.showwarning("请先选择区域", "请先点击「选择区域」按钮")
+            messagebox.showwarning("请先选择区域", "请先点击选择区域按钮")
             return
         self.threshold = self.threshold_var.get()
         self.frequency = self.freq_var.get()
