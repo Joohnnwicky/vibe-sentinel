@@ -41,6 +41,7 @@ class RegionSelector:
         self.root = None
         self.sct = mss.mss()
         self.monitor_info = self.sct.monitors[monitor_num]
+        log_error(f"Monitor {monitor_num} info: {self.monitor_info}")
 
     def select(self):
         self.start_x = 0
@@ -49,37 +50,40 @@ class RegionSelector:
         self.current_y = 0
         self.is_selecting = False
 
+        monitor = self.monitor_info
+        screen_width = monitor['width']
+        screen_height = monitor['height']
+        screen_left = monitor['left']
+        screen_top = monitor['top']
+
+        log_error(f"Creating fullscreen window: {screen_width}x{screen_height} at ({screen_left}, {screen_top})")
+
         self.root = tk.Toplevel()
-        self.root.attributes('-fullscreen', True)
-        self.root.attributes('-alpha', 0.4)
+        self.root.geometry(f"{screen_width}x{screen_height}+{screen_left}+{screen_top}")
+        self.root.attributes('-fullscreen', False)
+        self.root.attributes('-alpha', 0.3)
         self.root.attributes('-topmost', True)
         self.root.configure(bg='gray')
 
         canvas = tk.Canvas(self.root, cursor='cross', bg='gray', highlightthickness=0)
         canvas.pack(fill='both', expand=True)
 
-        monitor = self.monitor_info
-        canvas.create_rectangle(
-            monitor['left'], monitor['top'],
-            monitor['left'] + monitor['width'], monitor['top'] + monitor['height'],
-            outline='', fill='gray'
-        )
+        canvas.create_rectangle(0, 0, screen_width, screen_height, outline='', fill='gray40')
 
         rect_id = [None]
         instruction_text_id = [None]
 
         def update_instruction():
             nonlocal instruction_text_id
-            text = "拖动鼠标选择监控区域 | 按 ESC 取消"
+            text = f"拖动鼠标选择监控区域 | 屏幕: {screen_width}x{screen_height} | 按 ESC 取消"
             if instruction_text_id[0]:
                 canvas.itemconfig(instruction_text_id[0], text=text)
             else:
                 instruction_text_id[0] = canvas.create_text(
-                    monitor['left'] + monitor['width'] // 2,
-                    monitor['top'] + 40,
+                    screen_width // 2, 30,
                     text=text,
                     fill='white',
-                    font=('Arial', 18, 'bold')
+                    font=('Arial', 16, 'bold')
                 )
 
         def on_mouse_down(event):
@@ -114,15 +118,18 @@ class RegionSelector:
             x2 = max(self.start_x, self.current_x)
             y2 = max(self.start_y, self.current_y)
             if x2 - x1 > 10 and y2 - y1 > 10:
-                self.region = (x1, y1, x2, y2)
+                self.region = (x1 + screen_left, y1 + screen_top, x2 + screen_left, y2 + screen_top)
             self.root.destroy()
 
         canvas.bind('<Button-1>', on_mouse_down)
         self.root.bind('<Escape>', lambda e: (setattr(self, 'region', None), self.root.destroy()))
         self.root.grab_set()
+        self.root.focus_force()
+        update_instruction()
         self.root.mainloop()
 
         self.sct.close()
+        log_error(f"Region selected: {self.region}")
         return self.region
 
 
@@ -134,6 +141,7 @@ class ScreenMonitor:
         self.last_screenshot = None
         self._lock = threading.Lock()
         self._monitor_info = self.sct.monitors[monitor_num]
+        log_error(f"ScreenMonitor init: monitor={monitor_num}, region={region}, monitor_info={self._monitor_info}")
 
     @property
     def monitor_info(self):
@@ -178,7 +186,7 @@ class SentinelApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Vibe Sentinel - 屏幕活动监控")
-        self.root.geometry("500x400")
+        self.root.geometry("500x420")
         self.root.resizable(False, False)
 
         self.monitor_num = 1
@@ -197,6 +205,19 @@ class SentinelApp:
         self.interval = BEEP_INTERVAL_DEFAULT
 
         self._setup_ui()
+        self._show_monitor_info()
+
+    def _show_monitor_info(self):
+        try:
+            sct = mss.mss()
+            monitors = sct.monitors
+            info_text = f"检测到 {len(monitors)-1} 个显示器\n"
+            for i, m in enumerate(monitors[1:], 1):
+                info_text += f"  显示器{i}: {m['width']}x{m['height']} at ({m['left']}, {m['top']})\n"
+            self.info_label.config(text=info_text.strip())
+            sct.close()
+        except Exception as e:
+            log_error(f"_show_monitor_info error: {e}")
 
     def _setup_ui(self):
         main_frame = ttk.Frame(self.root, padding="10")
@@ -206,7 +227,10 @@ class SentinelApp:
         title_label.pack(pady=(0, 5))
 
         subtitle_label = ttk.Label(main_frame, text="屏幕活动监控报警器", font=('Arial', 10))
-        subtitle_label.pack(pady=(0, 15))
+        subtitle_label.pack(pady=(0, 10))
+
+        self.info_label = ttk.Label(main_frame, text="检测显示器信息中...", font=('Arial', 9), foreground='gray')
+        self.info_label.pack(pady=(0, 10))
 
         region_frame = ttk.LabelFrame(main_frame, text="监控区域", padding="10")
         region_frame.pack(fill='x', pady=(0, 10))
@@ -302,7 +326,7 @@ class SentinelApp:
             img = img.crop((left, top, right, bottom))
 
             preview_width = 300
-            ratio = img.width / img.height
+            ratio = img.width / img.height if img.height > 0 else 1
             preview_height = int(preview_width / ratio)
             img = img.resize((preview_width, preview_height), Image.Resampling.LANCZOS)
 
