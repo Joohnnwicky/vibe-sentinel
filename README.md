@@ -1,6 +1,9 @@
+
 # Vibe Sentinel
 
 屏幕活动监控报警器 - 监控指定区域画面变化，当检测到空闲时自动发出警报（支持自定义MP3）。
+
+<img width="460" height="684" alt="PixPin_2026-04-24_16-13-56" src="https://github.com/user-attachments/assets/7df24311-bfbb-4c3f-b8e3-7e3d952a235d" />
 
 ## 功能特性
 
