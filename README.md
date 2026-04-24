@@ -25,11 +25,10 @@
 
 ## 安装
 
-### 方式一：下载 Release 版本（推荐）
+### 方式一：使用启动脚本（推荐）
 
-1. 前往 [Releases](https://github.com/Joohnnwicky/vibe-sentinel/releases) 页面
-2. 下载最新版本的 `VibeSentinel.exe`
-3. 直接运行即可
+1. 双击 `启动监控.bat` 文件
+2. 脚本会自动检查依赖并启动程序
 
 ### 方式二：从源码运行
 
@@ -47,11 +46,6 @@
    ```bash
    python vibe_sentinel_gui.py
    ```
-
-### 方式三：使用启动脚本
-
-1. 双击 `启动监控.bat` 文件
-2. 脚本会自动检查依赖并启动程序
 
 ## 使用方法
 
