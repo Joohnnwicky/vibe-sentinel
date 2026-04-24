@@ -11,7 +11,9 @@ from datetime import datetime
 import winsound
 import mss
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
+import tkinter as tk
+from pathlib import Path
 
 IDLE_THRESHOLD_DEFAULT = 30
 BEEP_FREQUENCY_DEFAULT = 880
@@ -22,6 +24,85 @@ CAPTURE_INTERVAL = 1.0
 PIXEL_CHANGE_THRESHOLD = 0.05
 
 
+class RegionSelector:
+    def __init__(self):
+        self.region = None
+        self.root = None
+
+    def _on_drag(self, event):
+        self.current_x = event.x
+        self.current_y = event.y
+
+    def _on_release(self, event):
+        x1 = min(self.start_x, event.x)
+        y1 = min(self.start_y, event.y)
+        x2 = max(self.start_x, event.x)
+        y2 = max(self.start_y, event.y)
+        self.region = (x1, y1, x2, y2)
+        self.root.destroy()
+
+    def select(self, monitor_info):
+        self.start_x = 0
+        self.start_y = 0
+        self.current_x = 0
+        self.current_y = 0
+
+        self.root = tk.Tk()
+        self.root.attributes('-fullscreen', True)
+        self.root.attributes('-alpha', 0.3)
+        self.root.attributes('-topmost', True)
+
+        canvas = tk.Canvas(self.root, cursor='cross', bg='gray')
+        canvas.pack(fill='both', expand=True)
+
+        rect_id = None
+
+        def on_mouse_down(event):
+            nonlocal rect_id
+            self.start_x = event.x
+            self.start_y = event.y
+            if rect_id:
+                canvas.delete(rect_id)
+            rect_id = canvas.create_rectangle(
+                self.start_x, self.start_y, self.current_x, self.current_y,
+                outline='red', width=3
+            )
+            canvas.bind('<Motion>', on_mouse_move)
+            canvas.bind('<ButtonRelease-1>', on_mouse_up)
+
+        def on_mouse_move(event):
+            nonlocal rect_id
+            self.current_x = event.x
+            self.current_y = event.y
+            if rect_id:
+                canvas.coords(rect_id, self.start_x, self.start_y,
+                             self.current_x, self.current_y)
+            else:
+                rect_id = canvas.create_rectangle(
+                    self.start_x, self.start_y, self.current_x, self.current_y,
+                    outline='red', width=3
+                )
+
+        def on_mouse_up(event):
+            self._on_release(event)
+
+        canvas.bind('<Button-1>', on_mouse_down)
+
+        info_text = f"选择监控区域 | 显示器: {monitor_info['width']}x{monitor_info['height']} | 按 ESC 取消"
+        canvas.create_text(
+            self.root.winfo_screenwidth() // 2,
+            50,
+            text=info_text,
+            fill='white',
+            font=('Arial', 20, 'bold')
+        )
+
+        self.root.bind('<Escape>', lambda e: (setattr(self, 'region', None), self.root.destroy()))
+        self.root.mainloop()
+
+        return self.region
+
+
 class ScreenMonitor:
     def __init__(self, monitor_num=1, region=None):
         self.monitor_num = monitor_num
@@ -29,14 +110,27 @@ class ScreenMonitor:
         self.sct = mss.mss()
         self.last_screenshot = None
         self._lock = threading.Lock()
+        self._monitor_info = self.sct.monitors[monitor_num]
+
+    @property
+    def monitor_info(self):
+        return {
+            'left': self._monitor_info['left'],
+            'top': self._monitor_info['top'],
+            'width': self._monitor_info['width'],
+            'height': self._monitor_info['height']
+        }
 
     def _get_pixels(self, screenshot):
         if self.region:
-            return np.array(screenshot.crop(self.region))[:, :, :3]
+            left, top, right, bottom = self.region
+            left = max(left, 0)
+            top = max(top, 0)
+            right = min(right, self._monitor_info['width'])
+            bottom = min(bottom, self._monitor_info['height'])
+            return np.array(screenshot.crop((left, top, right, bottom)))[:, :, :3]
         else:
-            monitor = self.sct.monitors[self.monitor_num]
-            bbox = (monitor["left"], monitor["top"], monitor["width"], monitor["height"])
-            return np.array(screenshot.crop(bbox))[:, :, :3]
+            return np.array(screenshot)[:, :, :3]
 
     def _compute_difference(self, img1, img2):
         if img1.shape != img2.shape:
@@ -45,9 +139,19 @@ class ScreenMonitor:
         return np.mean(diff)
 
     def capture_and_compare(self):
-        screenshot = self.sct.grab(self.sct.monitors[self.monitor_num])
+        monitor = self.sct.monitors[self.monitor_num]
+        screenshot = self.sct.grab(monitor)
         img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
-        pixels = self._get_pixels(img)
+
+        if self.region:
+            left, top, right, bottom = self.region
+            left = max(left - monitor['left'], 0)
+            top = max(top - monitor['top'], 0)
+            right = min(right - monitor['left'], monitor['width'])
+            bottom = min(bottom - monitor['top'], monitor['height'])
+            img = img.crop((left, top, right, bottom))
+
+        pixels = np.array(img)[:, :, :3]
 
         with self._lock:
             if self.last_screenshot is None:
@@ -126,8 +230,9 @@ class Sentinel:
         self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._monitor_thread.start()
 
+        region_str = "全屏" if not self.monitor.region else f"区域 {self.monitor.region}"
         print(f"Vibe Sentinel已启动 - 空闲阈值: {self.idle_threshold}秒")
-        print(f"监控屏幕 #{self.monitor.monitor_num}")
+        print(f"监控: 屏幕 #{self.monitor.monitor_num} | {region_str}")
         print("按Ctrl+C停止监控")
 
     def stop(self):
@@ -137,17 +242,37 @@ class Sentinel:
         print("Vibe Sentinel已停止")
 
 
+def parse_region(region_str):
+    if not region_str:
+        return None
+    try:
+        parts = [int(x.strip()) for x in region_str.split(',')]
+        if len(parts) == 4:
+            return tuple(parts)
+        else:
+            raise ValueError("需要4个数字: x1,y1,x2,y2")
+    except Exception as e:
+        raise argparse.ArgumentTypeError(f"无效的区域格式: {e}")
+
+
+def select_region_interactive(monitor_num):
+    selector = RegionSelector()
+    screen_monitor = ScreenMonitor(monitor_num=monitor_num)
+    return selector.select(screen_monitor.monitor_info)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Vibe Sentinel - 屏幕画面活动监控报警器",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python vibe_sentinel.py                    # 使用默认设置启动
-  python vibe_sentinel.py -t 60              # 设置60秒空闲阈值
-  python vibe_sentinel.py -f 1000 -d 500     # 设置1kHz频率,500ms持续时间
-  python vibe_sentinel.py -q                 # 静默模式(只记录,不发出蜂鸣)
-  python vibe_sentinel.py -m 2               # 监控第二个显示器
+  python vibe_sentinel.py                          # 交互式选择监控区域
+  python vibe_sentinel.py -s                        # 交互式选择监控区域
+  python vibe_sentinel.py -r 100,100,500,400       # 指定区域坐标
+  python vibe_sentinel.py -t 60                    # 设置60秒空闲阈值
+  python vibe_sentinel.py -f 1000 -d 500           # 设置1kHz频率,500ms持续时间
+  python vibe_sentinel.py -m 2                     # 监控第二个显示器
         """
     )
 
@@ -165,8 +290,21 @@ def main():
                         help='静默模式: 不发出蜂鸣,只在控制台输出')
     parser.add_argument('-m', '--monitor', type=int, default=1,
                         help='监控的显示器编号, 默认: 1')
+    parser.add_argument('-r', '--region', type=parse_region, default=None,
+                        help='监控区域坐标: x1,y1,x2,y2 (例如: 100,100,500,400)')
+    parser.add_argument('-s', '--select', action='store_true',
+                        help='交互式选择监控区域')
 
     args = parser.parse_args()
+
+    region = args.region
+    if args.select or (not region and not args.region):
+        print("请用鼠标拖动选择监控区域...")
+        time.sleep(0.5)
+        region = select_region_interactive(args.monitor)
+        if region is None:
+            print("未选择区域，退出程序")
+            return
 
     sentinel = Sentinel(
         idle_threshold=args.threshold,
@@ -175,7 +313,8 @@ def main():
         beep_count=args.count,
         beep_interval=args.interval,
         quiet_mode=args.quiet,
-        monitor_num=args.monitor
+        monitor_num=args.monitor,
+        region=region
     )
 
     try:
