@@ -6,6 +6,8 @@ Vibe Sentinel - 屏幕活动监控报警器 (GUI版本)
 
 import time
 import threading
+import sys
+import os
 from datetime import datetime
 import winsound
 import mss
@@ -13,6 +15,15 @@ import numpy as np
 from PIL import Image, ImageTk, ImageDraw
 import tkinter as tk
 from tkinter import ttk, messagebox
+
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'vibe_sentinel_error.log')
+
+def log_error(msg):
+    try:
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except:
+        pass
 
 IDLE_THRESHOLD_DEFAULT = 30
 BEEP_FREQUENCY_DEFAULT = 880
@@ -262,12 +273,16 @@ class SentinelApp:
 
     def _select_region(self):
         self.monitor_num = self.monitor_var.get()
-        selector = RegionSelector(self.monitor_num)
-        region = selector.select()
-        if region:
-            self.region = region
-            self.region_label.config(text=f"({region[0]}, {region[1]}) → ({region[2]}, {region[3]})")
-            self._update_preview()
+        try:
+            selector = RegionSelector(self.monitor_num)
+            region = selector.select()
+            if region:
+                self.region = region
+                self.region_label.config(text=f"({region[0]}, {region[1]}) → ({region[2]}, {region[3]})")
+                self._update_preview()
+        except Exception as e:
+            log_error(f"_select_region error: {e}")
+            messagebox.showerror("错误", f"选择区域失败: {e}")
 
     def _update_preview(self):
         if not self.region:
@@ -299,13 +314,17 @@ class SentinelApp:
 
             sct.close()
         except Exception as e:
+            log_error(f"_update_preview error: {e}")
             self.preview_label.config(text=f"预览失败: {e}")
 
     def _beep_alarm(self):
-        for i in range(self.count):
-            winsound.Beep(self.frequency, self.duration)
-            if i < self.count - 1:
-                time.sleep(self.interval)
+        try:
+            for i in range(self.count):
+                winsound.Beep(self.frequency, self.duration)
+                if i < self.count - 1:
+                    time.sleep(self.interval)
+        except Exception as e:
+            log_error(f"_beep_alarm error: {e}")
 
     def _monitor_loop(self):
         while self.is_running:
@@ -314,26 +333,29 @@ class SentinelApp:
             if not self.region:
                 continue
 
-            has_activity, _ = self.monitor.capture_and_compare()
+            try:
+                has_activity, _ = self.monitor.capture_and_compare()
 
-            if has_activity:
-                self.idle_start_time = None
-                self.alarm_triggered = False
-                self.root.after(0, lambda: self.status_label.config(
-                    text="状态: 监控中 (有活动)", foreground='green'))
-            else:
-                idle_time = time.time() - self.idle_start_time if self.idle_start_time else 0
-                self.root.after(0, lambda t=idle_time: self.status_label.config(
-                    text=f"状态: 画面静止 {int(t)} 秒", foreground='orange'))
-
-                if self.idle_start_time is None:
-                    self.idle_start_time = time.time()
-
-                if idle_time >= self.threshold and not self.alarm_triggered:
-                    self.alarm_triggered = True
-                    self._beep_alarm()
+                if has_activity:
+                    self.idle_start_time = None
+                    self.alarm_triggered = False
                     self.root.after(0, lambda: self.status_label.config(
-                        text=f"⚠️ 警报: 画面静止 {int(idle_time)} 秒!", foreground='red'))
+                        text="状态: 监控中 (有活动)", foreground='green'))
+                else:
+                    idle_time = time.time() - self.idle_start_time if self.idle_start_time else 0
+                    self.root.after(0, lambda t=idle_time: self.status_label.config(
+                        text=f"状态: 画面静止 {int(t)} 秒", foreground='orange'))
+
+                    if self.idle_start_time is None:
+                        self.idle_start_time = time.time()
+
+                    if idle_time >= self.threshold and not self.alarm_triggered:
+                        self.alarm_triggered = True
+                        self._beep_alarm()
+                        self.root.after(0, lambda: self.status_label.config(
+                            text=f"⚠️ 警报: 画面静止 {int(idle_time)} 秒!", foreground='red'))
+            except Exception as e:
+                log_error(f"_monitor_loop error: {e}")
 
         if self.monitor:
             self.monitor.close()
@@ -348,17 +370,21 @@ class SentinelApp:
         self.count = self.count_var.get()
         self.monitor_num = self.monitor_var.get()
 
-        self.monitor = ScreenMonitor(self.monitor_num, self.region)
-        self.is_running = True
-        self.idle_start_time = None
-        self.alarm_triggered = False
+        try:
+            self.monitor = ScreenMonitor(self.monitor_num, self.region)
+            self.is_running = True
+            self.idle_start_time = None
+            self.alarm_triggered = False
 
-        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self.monitor_thread.start()
+            self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+            self.monitor_thread.start()
 
-        self.start_btn.config(state='disabled')
-        self.stop_btn.config(state='normal')
-        self.status_label.config(text="状态: 监控中", foreground='green')
+            self.start_btn.config(state='disabled')
+            self.stop_btn.config(state='normal')
+            self.status_label.config(text="状态: 监控中", foreground='green')
+        except Exception as e:
+            log_error(f"_start error: {e}")
+            messagebox.showerror("错误", f"启动监控失败: {e}")
 
     def _stop(self):
         self.is_running = False
@@ -378,10 +404,16 @@ class SentinelApp:
 
 
 def main():
-    root = tk.Tk()
-    app = SentinelApp(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_closing)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        app = SentinelApp(root)
+        root.protocol("WM_DELETE_WINDOW", app.on_closing)
+        root.mainloop()
+    except Exception as e:
+        log_error(f"main error: {e}")
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Startup error: {e}\n")
+        raise
 
 
 if __name__ == "__main__":
