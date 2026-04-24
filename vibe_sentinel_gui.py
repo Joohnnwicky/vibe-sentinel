@@ -44,19 +44,13 @@ class RegionSelector:
         log_error(f"Monitor {monitor_num} info: {self.monitor_info}")
 
     def select(self):
-        self.start_x = 0
-        self.start_y = 0
-        self.current_x = 0
-        self.current_y = 0
-        self.is_selecting = False
-
         monitor = self.monitor_info
         screen_width = monitor['width']
         screen_height = monitor['height']
         screen_left = monitor['left']
         screen_top = monitor['top']
 
-        log_error(f"Creating fullscreen window: {screen_width}x{screen_height} at ({screen_left}, {screen_top})")
+        log_error(f"Creating selection window: {screen_width}x{screen_height} at ({screen_left}, {screen_top})")
 
         self.root = tk.Toplevel()
         self.root.geometry(f"{screen_width}x{screen_height}+{screen_left}+{screen_top}")
@@ -72,9 +66,9 @@ class RegionSelector:
 
         rect_id = [None]
         instruction_text_id = [None]
+        selection_data = {'start_x': 0, 'start_y': 0, 'is_selecting': False}
 
         def update_instruction():
-            nonlocal instruction_text_id
             text = f"拖动鼠标选择监控区域 | 屏幕: {screen_width}x{screen_height} | 按 ESC 取消"
             if instruction_text_id[0]:
                 canvas.itemconfig(instruction_text_id[0], text=text)
@@ -87,49 +81,44 @@ class RegionSelector:
                 )
 
         def on_mouse_down(event):
-            nonlocal rect_id
-            self.start_x = event.x
-            self.start_y = event.y
-            self.is_selecting = True
+            selection_data['start_x'] = event.x
+            selection_data['start_y'] = event.y
+            selection_data['is_selecting'] = True
             if rect_id[0]:
                 canvas.delete(rect_id[0])
             rect_id[0] = canvas.create_rectangle(
-                self.start_x, self.start_y, self.start_x, self.start_y,
+                event.x, event.y, event.x, event.y,
                 outline='red', width=3
             )
             update_instruction()
-            canvas.bind('<Motion>', on_mouse_move)
-            canvas.bind('<ButtonRelease-1>', on_mouse_up)
 
         def on_mouse_move(event):
-            if self.is_selecting:
-                self.current_x = event.x
-                self.current_y = event.y
-                if rect_id[0]:
-                    canvas.coords(rect_id[0], self.start_x, self.start_y,
-                                 self.current_x, self.current_y)
+            if selection_data['is_selecting'] and rect_id[0]:
+                canvas.coords(rect_id[0],
+                           selection_data['start_x'], selection_data['start_y'],
+                           event.x, event.y)
 
         def on_mouse_up(event):
-            self.is_selecting = False
-            self.current_x = event.x
-            self.current_y = event.y
-            x1 = min(self.start_x, self.current_x)
-            y1 = min(self.start_y, self.current_y)
-            x2 = max(self.start_x, self.current_x)
-            y2 = max(self.start_y, self.current_y)
+            selection_data['is_selecting'] = False
+            x1 = min(selection_data['start_x'], event.x)
+            y1 = min(selection_data['start_y'], event.y)
+            x2 = max(selection_data['start_x'], event.x)
+            y2 = max(selection_data['start_y'], event.y)
             if x2 - x1 > 10 and y2 - y1 > 10:
                 self.region = (x1 + screen_left, y1 + screen_top, x2 + screen_left, y2 + screen_top)
+                log_error(f"Region selected: {self.region}")
             self.root.destroy()
 
         canvas.bind('<Button-1>', on_mouse_down)
-        self.root.bind('<Escape>', lambda e: (setattr(self, 'region', None), self.root.destroy()))
+        canvas.bind('<B1-Motion>', on_mouse_move)
+        canvas.bind('<ButtonRelease-1>', on_mouse_up)
+        self.root.bind('<Escape>', lambda e: self.root.destroy())
         self.root.grab_set()
         self.root.focus_force()
         update_instruction()
         self.root.mainloop()
 
         self.sct.close()
-        log_error(f"Region selected: {self.region}")
         return self.region
 
 
